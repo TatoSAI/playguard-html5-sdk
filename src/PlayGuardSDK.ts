@@ -140,6 +140,7 @@ export class PlayGuardSDK {
         if (elAtCenter === tapped || elAtCenter.contains(tapped) || tapped.contains(elAtCenter)) {
           this.sendEvent('elementTapped', {
             element: name,
+            matchType: 'dom',
             tapX: Math.round(clientX),
             tapY: Math.round(clientY),
             elementX: Math.round(pos.x),
@@ -169,6 +170,7 @@ export class PlayGuardSDK {
       if (closestName !== null) {
         this.sendEvent('elementTapped', {
           element: closestName,
+          matchType: 'canvas',
           tapX: Math.round(clientX),
           tapY: Math.round(clientY),
           elementX: Math.round(closestPos!.x),
