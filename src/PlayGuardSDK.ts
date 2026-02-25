@@ -6,6 +6,7 @@ import type {
   ElementDescriptor,
   PlayGuardCommand,
   PlayGuardResponse,
+  PlayGuardEvent,
   PlayGuardSDKOptions
 } from './types.js'
 
@@ -17,6 +18,8 @@ export class PlayGuardSDK {
   private actions = new Map<string, ActionHandler>()
   private commands = new Map<string, CommandHandler>()
   private elements = new Map<string, ElementDescriptor>()
+  private clickMonitoringActive = false
+  private boundPointerDown = this.onPointerDown.bind(this)
 
   private constructor(options: PlayGuardSDKOptions = {}) {
     const { url = 'ws://localhost:9876', reconnectDelay = 2000, autoConnect = true } = options
@@ -102,6 +105,52 @@ export class PlayGuardSDK {
    */
   registerElement(name: string, getPosition: () => { x: number; y: number } | null): void {
     this.elements.set(name, { name, getPosition })
+    // Start monitoring clicks once the first element is registered
+    if (!this.clickMonitoringActive) {
+      this.clickMonitoringActive = true
+      window.addEventListener('pointerdown', this.boundPointerDown, true)
+    }
+  }
+
+  /**
+   * Called on every pointerdown in the game window.
+   * Finds the nearest registered element and sends an elementTapped event to PlayGuard.
+   */
+  private onPointerDown(e: PointerEvent): void {
+    if (this.elements.size === 0) return
+    const { clientX, clientY } = e
+
+    let closestName: string | null = null
+    let closestDist = Infinity
+    let closestPos: { x: number; y: number } | null = null
+
+    for (const [name, el] of this.elements) {
+      const pos = el.getPosition()
+      if (!pos) continue
+      const dist = Math.sqrt((pos.x - clientX) ** 2 + (pos.y - clientY) ** 2)
+      if (dist < closestDist) {
+        closestDist = dist
+        closestName = name
+        closestPos = pos
+      }
+    }
+
+    if (closestName !== null) {
+      this.sendEvent('elementTapped', {
+        element: closestName,
+        tapX: Math.round(clientX),
+        tapY: Math.round(clientY),
+        elementX: Math.round(closestPos!.x),
+        elementY: Math.round(closestPos!.y),
+        dist: Math.round(closestDist)
+      })
+    }
+  }
+
+  /** Send an unsolicited event notification to PlayGuard */
+  private sendEvent(event: string, data: any): void {
+    const msg: PlayGuardEvent = { type: 'event', event, data }
+    this.wsClient.send(msg as any)
   }
 
   /** Returns true if currently connected to PlayGuard */
@@ -111,6 +160,10 @@ export class PlayGuardSDK {
 
   /** Permanently disconnect and stop reconnection */
   destroy(): void {
+    if (this.clickMonitoringActive) {
+      window.removeEventListener('pointerdown', this.boundPointerDown, true)
+      this.clickMonitoringActive = false
+    }
     this.wsClient.destroy()
     PlayGuardSDK._instance = null
   }

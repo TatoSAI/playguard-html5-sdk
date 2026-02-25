@@ -16,6 +16,13 @@ export interface PlayGuardResponse {
   error?: string
 }
 
+/** Unsolicited event sent FROM the game TO PlayGuard */
+export interface PlayGuardEvent {
+  type: 'event'
+  event: string // e.g. 'elementTapped'
+  data: any
+}
+
 export type PropertyGetter = () => string | number | boolean | null
 export type ActionHandler = (args: string[]) => void | Promise<void>
 export type CommandHandler = (param: string) => any | Promise<any>
