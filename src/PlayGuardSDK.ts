@@ -114,37 +114,40 @@ export class PlayGuardSDK {
 
   /**
    * Called on every pointerdown in the game window.
-   * Finds the nearest registered element and sends an elementTapped event to PlayGuard.
+   * Uses DOM hit-testing to fire elementTapped only when the tap lands exactly
+   * on a registered element — no proximity matching, no false positives.
    */
   private onPointerDown(e: PointerEvent): void {
     if (this.elements.size === 0) return
     const { clientX, clientY } = e
 
-    let closestName: string | null = null
-    let closestDist = Infinity
-    let closestPos: { x: number; y: number } | null = null
+    // The actual DOM node the user tapped
+    const tapped = document.elementFromPoint(clientX, clientY)
+    if (!tapped) return
 
     for (const [name, el] of this.elements) {
       const pos = el.getPosition()
       if (!pos) continue
-      const dist = Math.sqrt((pos.x - clientX) ** 2 + (pos.y - clientY) ** 2)
-      if (dist < closestDist) {
-        closestDist = dist
-        closestName = name
-        closestPos = pos
+
+      // DOM node at the registered element's center
+      const elAtCenter = document.elementFromPoint(pos.x, pos.y)
+      // Skip canvas-rendered elements — DOM hit-testing can't distinguish
+      // individual objects drawn inside a <canvas>
+      if (!elAtCenter || elAtCenter.tagName === 'CANVAS') continue
+
+      // Match: tap landed on the element itself or one of its descendants
+      if (elAtCenter === tapped || elAtCenter.contains(tapped) || tapped.contains(elAtCenter)) {
+        this.sendEvent('elementTapped', {
+          element: name,
+          tapX: Math.round(clientX),
+          tapY: Math.round(clientY),
+          elementX: Math.round(pos.x),
+          elementY: Math.round(pos.y)
+        })
+        return // first exact match wins; don't report multiple elements
       }
     }
-
-    if (closestName !== null) {
-      this.sendEvent('elementTapped', {
-        element: closestName,
-        tapX: Math.round(clientX),
-        tapY: Math.round(clientY),
-        elementX: Math.round(closestPos!.x),
-        elementY: Math.round(closestPos!.y),
-        dist: Math.round(closestDist)
-      })
-    }
+    // No exact DOM match — tap was not on any registered element; send nothing
   }
 
   /** Send an unsolicited event notification to PlayGuard */
