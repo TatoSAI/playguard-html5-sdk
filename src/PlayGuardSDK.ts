@@ -150,8 +150,8 @@ export class PlayGuardSDK {
         }
       }
     } else {
-      // ── Canvas game: bounded proximity (≤ 50 px) ─────────────────────────
-      const THRESHOLD = 50
+      // ── Canvas game: bounded proximity (≤ 35 px) ─────────────────────────
+      const THRESHOLD = 35
       let closestName: string | null = null
       let closestDist = THRESHOLD
       let closestPos: { x: number; y: number } | null = null
