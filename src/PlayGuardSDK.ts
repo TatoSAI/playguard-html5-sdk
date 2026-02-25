@@ -114,40 +114,69 @@ export class PlayGuardSDK {
 
   /**
    * Called on every pointerdown in the game window.
-   * Uses DOM hit-testing to fire elementTapped only when the tap lands exactly
-   * on a registered element — no proximity matching, no false positives.
+   *
+   * Strategy:
+   *  - DOM game  → exact hit-test via document.elementFromPoint; only fires
+   *                when the tap lands on (or inside) the registered element.
+   *  - Canvas game → the tapped node is the <canvas> itself so DOM matching
+   *                  is impossible; falls back to proximity with a strict
+   *                  50 px radius so only elements actually under the finger
+   *                  are reported (nearest-wins, bounded).
    */
   private onPointerDown(e: PointerEvent): void {
     if (this.elements.size === 0) return
     const { clientX, clientY } = e
 
-    // The actual DOM node the user tapped
     const tapped = document.elementFromPoint(clientX, clientY)
     if (!tapped) return
 
-    for (const [name, el] of this.elements) {
-      const pos = el.getPosition()
-      if (!pos) continue
+    if (tapped.tagName !== 'CANVAS') {
+      // ── DOM game: exact hit-test ──────────────────────────────────────────
+      for (const [name, el] of this.elements) {
+        const pos = el.getPosition()
+        if (!pos) continue
+        const elAtCenter = document.elementFromPoint(pos.x, pos.y)
+        if (!elAtCenter || elAtCenter.tagName === 'CANVAS') continue
+        if (elAtCenter === tapped || elAtCenter.contains(tapped) || tapped.contains(elAtCenter)) {
+          this.sendEvent('elementTapped', {
+            element: name,
+            tapX: Math.round(clientX),
+            tapY: Math.round(clientY),
+            elementX: Math.round(pos.x),
+            elementY: Math.round(pos.y)
+          })
+          return
+        }
+      }
+    } else {
+      // ── Canvas game: bounded proximity (≤ 50 px) ─────────────────────────
+      const THRESHOLD = 50
+      let closestName: string | null = null
+      let closestDist = THRESHOLD
+      let closestPos: { x: number; y: number } | null = null
 
-      // DOM node at the registered element's center
-      const elAtCenter = document.elementFromPoint(pos.x, pos.y)
-      // Skip canvas-rendered elements — DOM hit-testing can't distinguish
-      // individual objects drawn inside a <canvas>
-      if (!elAtCenter || elAtCenter.tagName === 'CANVAS') continue
+      for (const [name, el] of this.elements) {
+        const pos = el.getPosition()
+        if (!pos) continue
+        const dist = Math.sqrt((pos.x - clientX) ** 2 + (pos.y - clientY) ** 2)
+        if (dist < closestDist) {
+          closestDist = dist
+          closestName = name
+          closestPos = pos
+        }
+      }
 
-      // Match: tap landed on the element itself or one of its descendants
-      if (elAtCenter === tapped || elAtCenter.contains(tapped) || tapped.contains(elAtCenter)) {
+      if (closestName !== null) {
         this.sendEvent('elementTapped', {
-          element: name,
+          element: closestName,
           tapX: Math.round(clientX),
           tapY: Math.round(clientY),
-          elementX: Math.round(pos.x),
-          elementY: Math.round(pos.y)
+          elementX: Math.round(closestPos!.x),
+          elementY: Math.round(closestPos!.y),
+          dist: Math.round(closestDist)
         })
-        return // first exact match wins; don't report multiple elements
       }
     }
-    // No exact DOM match — tap was not on any registered element; send nothing
   }
 
   /** Send an unsolicited event notification to PlayGuard */
