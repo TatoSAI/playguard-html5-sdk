@@ -18,8 +18,6 @@ export class PlayGuardSDK {
   private actions = new Map<string, ActionHandler>()
   private commands = new Map<string, CommandHandler>()
   private elements = new Map<string, ElementDescriptor>()
-  private clickMonitoringActive = false
-  private boundPointerDown = this.onPointerDown.bind(this)
 
   private constructor(options: PlayGuardSDKOptions = {}) {
     const { url = 'ws://localhost:9876', reconnectDelay = 2000, autoConnect = true } = options
@@ -86,17 +84,24 @@ export class PlayGuardSDK {
   }
 
   /**
-   * Register a named UI element so PlayGuard can tap it by name.
-   * getPosition should return the element's current center in CSS pixels.
+   * Register a named UI element so PlayGuard can tap it programmatically.
+   * getPosition must return the element's center in viewport CSS pixels —
+   * used by the `tapElement` test command to dispatch synthetic events.
+   *
+   * For tap *detection* (observing what the user taps), call notifyTapped()
+   * from your game's own click/tap handler instead.
    *
    * @example
-   * // Phaser
-   * sdk.registerElement('playButton', () => ({
-   *   x: playButtonSprite.x,
-   *   y: playButtonSprite.y
-   * }))
+   * // Phaser — convert game coords to viewport CSS pixels
+   * const canvas = document.querySelector('canvas')!
+   * sdk.registerElement('playButton', () => {
+   *   const rect = canvas.getBoundingClientRect()
+   *   const sx = rect.width  / canvas.width
+   *   const sy = rect.height / canvas.height
+   *   return { x: rect.left + playBtn.x * sx, y: rect.top + playBtn.y * sy }
+   * })
    *
-   * // DOM
+   * // DOM element
    * sdk.registerElement('loginBtn', () => {
    *   const el = document.getElementById('login-btn')
    *   const rect = el?.getBoundingClientRect()
@@ -105,80 +110,25 @@ export class PlayGuardSDK {
    */
   registerElement(name: string, getPosition: () => { x: number; y: number } | null): void {
     this.elements.set(name, { name, getPosition })
-    // Start monitoring clicks once the first element is registered
-    if (!this.clickMonitoringActive) {
-      this.clickMonitoringActive = true
-      window.addEventListener('pointerdown', this.boundPointerDown, true)
-    }
   }
 
   /**
-   * Called on every pointerdown in the game window.
+   * Notify PlayGuard that the user tapped a named element.
+   * Call this directly from your game's button/tap handler — this is the
+   * recommended way to report element taps since the game already knows
+   * exactly which element was interacted with.
    *
-   * Strategy:
-   *  - DOM game  → exact hit-test via document.elementFromPoint; only fires
-   *                when the tap lands on (or inside) the registered element.
-   *  - Canvas game → the tapped node is the <canvas> itself so DOM matching
-   *                  is impossible; falls back to proximity with a strict
-   *                  50 px radius so only elements actually under the finger
-   *                  are reported (nearest-wins, bounded).
+   * @example
+   * // Phaser
+   * playButton.on('pointerdown', () => sdk.notifyTapped('playButton'))
+   *
+   * // DOM
+   * document.getElementById('coin-btn')?.addEventListener('click', () => {
+   *   sdk.notifyTapped('coinButton')
+   * })
    */
-  private onPointerDown(e: PointerEvent): void {
-    if (this.elements.size === 0) return
-    const { clientX, clientY } = e
-
-    const tapped = document.elementFromPoint(clientX, clientY)
-    if (!tapped) return
-
-    if (tapped.tagName !== 'CANVAS') {
-      // ── DOM game: exact hit-test ──────────────────────────────────────────
-      for (const [name, el] of this.elements) {
-        const pos = el.getPosition()
-        if (!pos) continue
-        const elAtCenter = document.elementFromPoint(pos.x, pos.y)
-        if (!elAtCenter || elAtCenter.tagName === 'CANVAS') continue
-        if (elAtCenter === tapped || elAtCenter.contains(tapped) || tapped.contains(elAtCenter)) {
-          this.sendEvent('elementTapped', {
-            element: name,
-            matchType: 'dom',
-            tapX: Math.round(clientX),
-            tapY: Math.round(clientY),
-            elementX: Math.round(pos.x),
-            elementY: Math.round(pos.y)
-          })
-          return
-        }
-      }
-    } else {
-      // ── Canvas game: bounded proximity (≤ 35 px) ─────────────────────────
-      const THRESHOLD = 35
-      let closestName: string | null = null
-      let closestDist = THRESHOLD
-      let closestPos: { x: number; y: number } | null = null
-
-      for (const [name, el] of this.elements) {
-        const pos = el.getPosition()
-        if (!pos) continue
-        const dist = Math.sqrt((pos.x - clientX) ** 2 + (pos.y - clientY) ** 2)
-        if (dist < closestDist) {
-          closestDist = dist
-          closestName = name
-          closestPos = pos
-        }
-      }
-
-      if (closestName !== null) {
-        this.sendEvent('elementTapped', {
-          element: closestName,
-          matchType: 'canvas',
-          tapX: Math.round(clientX),
-          tapY: Math.round(clientY),
-          elementX: Math.round(closestPos!.x),
-          elementY: Math.round(closestPos!.y),
-          dist: Math.round(closestDist)
-        })
-      }
-    }
+  notifyTapped(name: string): void {
+    this.sendEvent('elementTapped', { element: name, matchType: 'explicit' })
   }
 
   /** Send an unsolicited event notification to PlayGuard */
@@ -194,10 +144,6 @@ export class PlayGuardSDK {
 
   /** Permanently disconnect and stop reconnection */
   destroy(): void {
-    if (this.clickMonitoringActive) {
-      window.removeEventListener('pointerdown', this.boundPointerDown, true)
-      this.clickMonitoringActive = false
-    }
     this.wsClient.destroy()
     PlayGuardSDK._instance = null
   }
