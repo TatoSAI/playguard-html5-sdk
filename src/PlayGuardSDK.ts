@@ -131,6 +131,42 @@ export class PlayGuardSDK {
     this.sendEvent('elementTapped', { element: name, matchType: 'explicit' })
   }
 
+  /**
+   * Notify PlayGuard that a game function was called.
+   * Shows up in the Ad-Hoc event log with the function name and arguments.
+   *
+   * @example
+   * function addCoins(amount: number) {
+   *   sdk.notifyCall('addCoins', [amount])
+   *   // log shows: addCoins(1)
+   *   coins += amount
+   * }
+   *
+   * sdk.notifyCall('skipTutorial')
+   * // log shows: skipTutorial()
+   */
+  notifyCall(name: string, args?: any[]): void {
+    const label =
+      args && args.length > 0
+        ? `${name}(${args.map(String).join(', ')})`
+        : `${name}()`
+    this.sendEvent('functionCalled', { fn: name, args: args ?? [], label })
+  }
+
+  /**
+   * Send a custom log message to PlayGuard.
+   * Shows up in the Ad-Hoc event log with the given message and level.
+   *
+   * @example
+   * sdk.log('Se agregó 1 moneda')
+   * sdk.log('Nivel completado', 'info')
+   * sdk.log('Monedas insuficientes', 'warn')
+   * sdk.log('Error al guardar partida', 'error')
+   */
+  log(message: string, level: 'info' | 'warn' | 'error' = 'info'): void {
+    this.sendEvent('logMessage', { message, level })
+  }
+
   /** Send an unsolicited event notification to PlayGuard */
   private sendEvent(event: string, data: any): void {
     const msg: PlayGuardEvent = { type: 'event', event, data }
